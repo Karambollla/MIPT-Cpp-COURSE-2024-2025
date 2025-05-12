@@ -7,12 +7,9 @@
 #include <iostream>
 
 template<size_t N>
-class StackStorage {
-private:
+struct StackStorage {
   size_t header = 0;
   std::byte buffer[N];
-
-public:
 
   StackStorage() = default;
   StackStorage(const StackStorage<N>&) = delete;
@@ -21,7 +18,6 @@ public:
   StackStorage& operator=(const StackStorage<N>& other) = delete;
 
   void* allocate(size_t n, size_t align) {
-    std::cerr << (this == nullptr);
     void* aligned_ptr = buffer + header;
     size_t remain = N - header;
     if (std::align(align, n, aligned_ptr, remain) == nullptr) {
@@ -31,16 +27,6 @@ public:
     header = result_ptr - buffer + n;
     return result_ptr;
   }
-
-  void printheader() {
-    std::cout << header << " ";
-  }
-
-
-  std::byte* data() { return buffer; }
-  const std::byte* data() const { return buffer; }
-
-  friend int main();
 };
 
 template<typename T, size_t N>
@@ -58,19 +44,12 @@ public:
   using difference_type = std::ptrdiff_t;
 
   StackAllocator() = delete;
-
-  StackAllocator(StackStorage<N>& other) : storage(other) {
-    std::cout << "stackalloc_storcons, storage address: " << &other << "\n";
-  }
+  StackAllocator(StackStorage<N>& other) : storage(other) {}
 
   template<typename U>
   StackAllocator(const StackAllocator<U, N>& other)
-    : storage(other.storage) {
-    std::cout << "stackalloc_copy, storage address: " << &(other.storage) << "\n";
-  }
-
+    : storage(other.storage) {}
   ~StackAllocator() = default;
-
   StackAllocator& operator=(const StackAllocator& other) = default;
 
   StackAllocator select_on_container_copy_construction() {
@@ -78,11 +57,9 @@ public:
   }
 
   pointer allocate(size_t n) {
-    std::cout << "alloc\n";
     void* a = storage.allocate(n * sizeof(T), alignof(T));
     return reinterpret_cast<pointer>(a);
   }
-
   void deallocate(pointer, size_t) { }
 
   bool operator==(const StackAllocator& other) const {
@@ -98,10 +75,6 @@ public:
   };
 };
 
-
-
-
-
 template<typename T, typename Allocator = std::allocator<T>>
 class List {
 private:
@@ -113,8 +86,6 @@ private:
 
     Node() : val(T()) {}
     Node(const T& val) : val(val) {}
-    Node(const Node& other) : val(other.val), prev(other.prev), next(other.next) {}
-
   };
 
   Node* head_ = nullptr;
@@ -128,8 +99,8 @@ private:
   template<bool isConst>
   class common_iterator;
 
-  [[no_unique_address]] NodeAllocator nodeallocator_;
   [[no_unique_address]] Allocator allocator_;
+  [[no_unique_address]] NodeAllocator nodeallocator_;
 
 public:
 
@@ -143,9 +114,9 @@ public:
   const_iterator begin() const { return const_iterator(head_, this); }
   const_iterator cbegin() const { return const_iterator(head_, this); }
 
-  iterator end() { return iterator(((tail_ == nullptr) ? nullptr : tail_->next), this); }
-  const_iterator end() const { return const_iterator(((tail_ == nullptr) ? nullptr : tail_->next), this); }
-  const_iterator cend() const { return const_iterator(((tail_ == nullptr) ? nullptr : tail_->next), this); }
+  iterator end() { return iterator(tail_->next, this); }
+  const_iterator end() const { return const_iterator(tail_->next, this); }
+  const_iterator cend() const { return const_iterator(tail_->next, this); }
 
   reverse_iterator rbegin() { return std::make_reverse_iterator(end()); }
   const_reverse_iterator rbegin() const { return std::make_reverse_iterator(end()); }
@@ -156,94 +127,65 @@ public:
   const_reverse_iterator crend() const { return std::make_reverse_iterator(cbegin()); }
 
   List() : allocator_(), nodeallocator_(allocator_) {}
+  List(const Allocator& alloc) : allocator_(AllocTraits::select_on_container_copy_construction(alloc)), nodeallocator_(allocator_) {}
 
-  List(const Allocator& alloc) :
-    allocator_(AllocTraits::select_on_container_copy_construction(alloc)),
-    nodeallocator_(allocator_)
-  {
-    std::cout << "List constructor, allocator address: " << &allocator_ << "\n";
+  void clear() {
+    Node* current = head_;
+    while (current != nullptr) {
+      Node* next_node = current->next;
+      nodeAlloc::destroy(nodeallocator_, current);
+      nodeAlloc::deallocate(nodeallocator_, current, 1);
+      current = next_node;
+    }
+    head_ = nullptr;
+    tail_ = nullptr;
+    size_ = 0;
   }
 
   List(size_t n) : List() {
     try {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         push_back();
       }
     }
     catch (...) {
-      Node* current = head_;
-      while (current != nullptr) {
-        Node* next_node = current->next;
-        nodeAlloc::destroy(nodeallocator_, current);
-        nodeAlloc::deallocate(nodeallocator_, current, 1);
-        current = next_node;
-      }
-      head_ = nullptr;
-      tail_ = nullptr;
-      size_ = 0;
+      clear();
       throw;
     }
   }
 
   List(size_t n, const T& other) : List() {
     try {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         push_back(other);
       }
     }
     catch (...) {
-      Node* current = head_;
-      while (current != nullptr) {
-        Node* next_node = current->next;
-        nodeAlloc::destroy(nodeallocator_, current);
-        nodeAlloc::deallocate(nodeallocator_, current, 1);
-        current = next_node;
-      }
-      head_ = nullptr;
-      tail_ = nullptr;
-      size_ = 0;
+      clear();
       throw;
     }
   }
 
   List(size_t n, const Allocator& allocator) : List(allocator) {
     try {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         push_back();
       }
     }
     catch (...) {
-      Node* current = head_;
-      while (current != nullptr) {
-        Node* next_node = current->next;
-        nodeAlloc::destroy(nodeallocator_, current);
-        nodeAlloc::deallocate(nodeallocator_, current, 1);
-        current = next_node;
-      }
-      head_ = nullptr;
-      tail_ = nullptr;
-      size_ = 0;
+      clear();
       throw;
     }
   }
 
   List(size_t n, const T& other, const Allocator& allocator) : List(allocator) {
     try {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         push_back(other);
       }
     }
     catch (...) {
-      Node* current = head_;
-      while (current != nullptr) {
-        Node* next_node = current->next;
-        nodeAlloc::destroy(nodeallocator_, current);
-        nodeAlloc::deallocate(nodeallocator_, current, 1);
-        current = next_node;
-      }
-      head_ = nullptr;
-      tail_ = nullptr;
-      size_ = 0;
+      clear();
       throw;
     }
   }
@@ -255,16 +197,7 @@ public:
       }
     }
     catch (...) {
-      Node* current = head_;
-      while (current != nullptr) {
-        Node* prv = current->next;
-        nodeAlloc::destroy(nodeallocator_, current);
-        nodeAlloc::deallocate(nodeallocator_, current, 1);
-        current = prv;
-      }
-      head_ = nullptr;
-      tail_ = nullptr;
-      size_ = 0;
+      clear();
       throw;
     }
   }
@@ -282,23 +215,13 @@ public:
         nodeallocator_ = other.nodeallocator_;
       }
       List temp(other);
-      std::swap(head_, temp.head_);
-      std::swap(tail_, temp.tail_);
-      std::swap(size_, temp.size_);
+      swap(temp);
     }
     return *this;
   }
 
   ~List() {
-    Node* current = head_;
-    while (current != nullptr) {
-      Node* next = current->next;
-      nodeAlloc::destroy(nodeallocator_, current);
-      nodeAlloc::deallocate(nodeallocator_, current, 1);
-      current = next;
-    }
-    size_ = 0;
-    head_ = tail_ = nullptr;
+    clear();
   }
 
   Allocator get_allocator() const {
@@ -378,14 +301,6 @@ public:
     }
     ++size_;
   }
-
-
-  //void getels() {
-  //  for (auto x : *this) {
-  //    std::cout << x << " ";
-  //  }
-  //  std::cout << "\n";
-  //}
 
   void pop_back() {
     if (!empty()) {
@@ -485,9 +400,6 @@ public:
 
   common_iterator(Node* node, const List* container)
     : node(node), container(container) {}
-
-  common_iterator(const common_iterator& other)
-    : node(other.node), container(other.container) {}
 
   operator common_iterator<true>() const {
     return common_iterator<true>(node, container);
